@@ -524,3 +524,33 @@ def rule(rule_id):
     form = UpdateRuleForm(request.form, obj=rule)
     flash_errors(form)
     return render_template('rule.html', form=form, rule=rule)
+
+
+@blueprint.route('/query/<string:query_type>', methods=['GET'])
+@login_required
+def result_query(query_type):
+    if query_type == 'results':
+        pass
+    elif query_type == 'distributed':
+        pass
+    else:
+        flash(u'Invalid query type: {0}'.format(query_type), 'danger')
+        return redirect(url_for('manage.nodes'))
+
+    # Collate all filters.
+    for filter in request.args.getlist('filters', []):
+        pass
+
+    # Figure out if we're doing any grouping or sorting.
+    group = request.args.get('group')
+    order_by = request.args.get('order_by', 'id')
+    if order_by not in choices:
+        # TODO
+        pass
+    order_by = getattr(model, order_by, 'id')
+
+    sort = request.args.get('sort', 'asc')
+    if sort not in ('asc', 'desc'):
+        sort = 'asc'
+
+    order_by = getattr(order_by, sort)()
