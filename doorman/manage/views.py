@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import re
 import json
 import datetime as dt
 
@@ -22,8 +23,8 @@ from .forms import (
 )
 from doorman.database import db
 from doorman.models import (
-    DistributedQuery, DistributedQueryTask,
-    FilePath, Node, Pack, Query, Tag, Rule, StatusLog
+    DistributedQuery, DistributedQueryTask, DistributedQueryResult,
+    FilePath, Node, Pack, Query, Tag, Rule, StatusLog, ResultLog
 )
 from doorman.utils import (
     create_query_pack_from_upload, flash_errors, get_paginate_options
@@ -526,31 +527,123 @@ def rule(rule_id):
     return render_template('rule.html', form=form, rule=rule)
 
 
-@blueprint.route('/query/<string:query_type>', methods=['GET'])
+@blueprint.route('/search/<string:search_type>', methods=['GET'])
 @login_required
-def result_query(query_type):
-    if query_type == 'results':
-        pass
-    elif query_type == 'distributed':
-        pass
+def search(search_type):
+    allowed_compare_fields = ['id', 'timestamp', 'node_id']
+
+    if search_type == 'results':
+        model = ResultLog
+        allowed_compare_fields.append('action')
+
+    elif search_type == 'distributed':
+        model = DistributedQueryTask
+        allowed_compare_fields.append('status')
+
     else:
-        flash(u'Invalid query type: {0}'.format(query_type), 'danger')
-        return redirect(url_for('manage.nodes'))
+        flash(u'Invalid query type: {0}'.format(search_type), 'danger')
+        return redirect(url_for('manage.nodes'))    # TODO: different location?
 
-    # Collate all filters.
-    for filter in request.args.getlist('filters', []):
-        pass
+    query = model.query
 
-    # Figure out if we're doing any grouping or sorting.
-    group = request.args.get('group')
-    order_by = request.args.get('order_by', 'id')
-    if order_by not in choices:
-        # TODO
-        pass
-    order_by = getattr(model, order_by, 'id')
+    # Collate filters
+    filters = []
+    for name, value in request.args.iteritems(multi=True):
+        m = re.match(r'filter\[(?P<num>[\d]+)\]\Z', name)
+        if not m:
+            continue
 
-    sort = request.args.get('sort', 'asc')
-    if sort not in ('asc', 'desc'):
-        sort = 'asc'
+        filter_num = m.group('num')
+        filter_value = request.args.get('value[{0}]'.format(filter_num))
+        if not filter_value:
+            flash(u'No value for filter {0}'.format(filter_num))
+            return redirect(url_for('manage.nodes'))    # TODO: different location?
 
-    order_by = getattr(order_by, sort)()
+        filters.append((value, filter_value))
+
+    # Apply filters to the query
+    for filter_type, value in filters:
+        if filter_type == 'node':
+            # TODO: verify node exists?
+            query = query.filter(model.node_id == int(value))
+
+        elif filter_type == 'query':
+            query = query.filter(model.id == int(value))
+
+        elif filter_type == 'timestamp':
+            # TODO
+            raise NotImplementedError
+
+        elif search_type == 'results' and filter_type == 'action':
+            query = query.filter(ResultLog.action == value)
+
+        elif search_type == 'distributed' and filter_type == 'status':
+            # Parse status
+            status_mapping = {
+                'new': DistributedQueryTask.NEW,
+                'pending': DistributedQueryTask.PENDING,
+                'complete': DistributedQueryTask.COMPLETE,
+            }
+            query = query.filter(DistributedQueryTask.status == status_mapping[value])
+
+    # We now have a query that finds the appropriate models.  However, if this
+    # is a distributed query we need to find the DistributedQueryResults that
+    # belong to each of these tasks.
+    if search_type == 'results':
+        results = query
+    elif search_type == 'distributed':
+        ids = [x.id for x in query.all()]
+        results = DistributedQueryResult.query.filter(DistributedQueryResult.distributed_query_task_id.in_(ids))
+
+    # Sort and paginate the results
+    try:
+        page = int(request.args.get('page', 1))
+    except Exception:
+        page = 1
+
+    results = get_paginate_options(
+        request,
+        model,
+        allowed_compare_fields,
+        existing_query=results,
+        page=page,
+    )
+
+    # Construct pagination helper
+    pagination = Pagination(page=page,
+                            per_page=results.per_page,
+                            total=results.total,
+                            alignment='center',
+                            show_single_page=False,
+                            record_name='results',
+                            bs_version=3)
+
+    # "Expand" the columns in each result.  Essentially, we want our result to
+    # look something like this:
+    #   (node, query, timestamp, action or status, col1, col2, ...)
+    #
+    # What we actually have is a bunch of result models.  We expand those here.
+    expanded_results = []
+    for result in results.items:
+        expanded = [
+            result.node,
+        ]
+
+        if search_type == 'results':
+            expanded.push(result.name)
+            expanded.push(result.action)
+        elif search_type == 'distributed':
+            expanded.push(result.distributed_query)
+            expanded.push(result.status)
+
+        # TODO: this clearly won't work if we have different column names...
+        expanded.extend(results.columns.values())
+
+    # Finally, render all these results
+    return render_template(
+        'search.html',
+        search_type=search_type,
+        filters=filters,
+        results=expanded_results,
+        pagination=pagination,
+    )

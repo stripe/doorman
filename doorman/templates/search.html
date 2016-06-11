@@ -1,0 +1,51 @@
+{% extends "layout.html" %}
+{% block content %}
+
+    <div class="body-content">
+        <div class="row">
+            <div class="col-md-12">
+                <h1>query</h1>
+                
+                <div class="row">
+                    <div class="col-xs-12">
+                        <h3>Conditions</h3>
+
+                        <ul>
+                        {% for filter_name, value in filters %}
+                            <li>{{ filter_name }} == {{ value }}</li>
+                        {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-xs-12">
+                        <table class="table">
+                            <thead>
+                                <th>Node</th>
+                                <th>Query</th>
+                                <th>
+                                    {%- if query_type == 'results' -%}
+                                        Action
+                                    {%- elif query_type == 'distributed' -%}
+                                        Status
+                                    {%- endif %}
+                                </th>
+                                <th colspan='99'>Columns</th>
+                            </thead>
+
+                            <tbody>
+                                {% for result in results %}
+                                    {% for col in result %}<td>{{ col }}</td>{% endfor %}
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+{% endblock %}
+
