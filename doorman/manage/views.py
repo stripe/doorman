@@ -407,6 +407,53 @@ def distributed_results(distributed_id, status=None, page=1):
                            pagination=pagination,
                            distributed_id=distributed_id)
 
+@blueprint.route('/queries/distributed/results/<int:distributed_id>.csv')
+@login_required
+def distributed_results_csv(distributed_id):
+    headers = [
+        'Node',
+        'Created',
+        'Run After',
+        'Retrieved',
+        'Status',
+    ]
+
+    query = DistributedQuery.query.filter_by(id=distributed_id).first_or_404()
+    tasks = DistributedQueryTask.query.filter_by(distributed_query_id=query.id)
+    columns = []
+    for task in tasks.items:
+        if len(task.results) > 0 and len(task.results[0].columns) > 0:
+            columns = sorted(task.results[0].columns.keys())
+    headers.extend([col for col in columns])
+
+    bio = BytesIO()
+    writer = csv.writer(bio)
+    writer.writerow(headers)
+
+    for task in tasks:
+        if not task.results:
+            continue
+        for result in task.results:
+            row = [
+                task.node.display_name,
+                task.distributed_query.timestamp,
+                task.distributed_query.not_before,
+                task.timestamp,
+                task.status,
+            ]
+            row.extend([result.columns[col] for col in columns])
+            writer.writerow(row)
+    bio.seek(0)
+    response = send_file(
+        bio,
+        mimetype='text/csv',
+        as_attachment=True,
+        attachment_filename=('query_%d.csv' % distributed_id)
+    )
+
+    return response
+
+
 
 @blueprint.route('/queries/distributed/add', methods=['GET', 'POST'])
 @login_required
